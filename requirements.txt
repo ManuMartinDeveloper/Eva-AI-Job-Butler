@@ -12,6 +12,7 @@ sqlalchemy
 
 # Browser Automation
 playwright
+playwright-stealth
 
 # Frontend
 streamlit

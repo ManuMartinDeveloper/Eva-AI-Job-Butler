@@ -1,16 +1,88 @@
 #scrapers/job_scout.py
 
+#run the initial_login.py to save the session data before running this script
 import os
 import sqlite3
 import csv
 import pandas as pd
 from jobspy import scrape_jobs
 from datetime import datetime
+from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeoutError
+# from playwright_stealth import stealth_sync
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 # --- Configuration ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
 OUTPUT_PATH = os.path.join(_PROJECT_ROOT, 'data', 'jobs_details')
+SESSION_DATA_PATH = os.path.join(_PROJECT_ROOT, "data", "playwright_session")
+
+
+
+LINKEDIN_EMAIL = os.getenv("LINKEDIN_EMAIL")
+LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD")
+
+# --- Deep Scraping with Playwright ---
+def get_full_job_description(job_url: str) -> str:
+    """
+    Visits a job URL using Playwright and scrapes the full job description text.
+    NOTE: This requires custom selectors for each job site (LinkedIn, Indeed, etc.).
+    """
+    print(f"Performing deep scrape for URL: {job_url}")
+    description = "Could not retrieve full description."
+    
+    with sync_playwright() as p:
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=SESSION_DATA_PATH,
+            headless=False # Can now run in the background
+        )
+        page = context.new_page()
+        print('launched with existing session data')
+        try:
+            page.goto(job_url, timeout=600000)
+            
+            # --- This is the part you MUST customize for each job site ---
+            if "linkedin.com" in job_url:
+                # page.goto(job_url, timeout=60000)
+                show_more_button = page.locator("button[aria-label='Click to see more description']")
+                if show_more_button:
+                    show_more_button.click()
+                
+                # The selector for the main description content on LinkedIn
+                description_locator = page.locator("div.jobs-description__content.jobs-description-content.jobs-description__content--condensed")
+                
+                description = description_locator.inner_text()
+            
+            elif "indeed.com" in job_url:
+                # The selector for the job description on Indeed
+                description_locator = page.locator("div#jobDescriptionText")
+                description = description_locator.inner_text()
+            
+            elif "glassdoor.com" in job_url:
+                show_more_button = page.locator("button[aria-label='Show more, visually expand the content']")
+                if show_more_button:
+                    show_more_button.click()
+
+                # The selector for the job description on Glassdoor
+                description_locator = page.locator("div.JobDetails_jobDescription__uW_fK.JobDetails_showHidden__C_FOA")
+                description = description_locator.inner_text()
+
+            # Add more 'elif' blocks for other sites like Glassdoor, Naukri, etc.
+
+        except PlaywrightTimeoutError:
+            print(f"Timeout while trying to load {job_url}")
+        except Exception as e:
+            print(f"An error occurred during deep scrape: {e}")
+        finally:
+            context.close()
+            
+    return description
+
+
+# --- Job Scraping and Storage ---
 
 def fetch_and_save_jobs(search_term="AIML Engineer", location="Bengaluru", results_wanted=50, hours_old=48):
     """
@@ -32,6 +104,12 @@ def fetch_and_save_jobs(search_term="AIML Engineer", location="Bengaluru", resul
     # Dedupe by title + company
     jobs_deduped = jobs.drop_duplicates(subset=["title", "company"])
     
+    # Deep scrape job descriptions
+    jobs_deduped['description'] = jobs_deduped.apply(
+        lambda row: get_full_job_description(row['job_url']) if pd.isna(row.get('description')) or len(row.get('description', '')) < 100 else row['description'],
+        axis=1
+    )
+
     # Save to CSV
     filename = f"job_leads_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
     os.makedirs(OUTPUT_PATH, exist_ok=True)  # Ensure directory exists

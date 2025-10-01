@@ -3,3 +3,5 @@ venv/
 .env
 data/jobs_details/
 data/job_seeker.db
+data/playwright_session/
+learnings/
