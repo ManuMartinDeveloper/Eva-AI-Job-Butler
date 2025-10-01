@@ -2,7 +2,7 @@ First install the required libraries and packages:
     pip install -r requirements.txt
 
 input the data in the core\ingest.py module and then excecute the core\ingest.py manually or run ```streamlit run dashboard\Basic_App_phase1.py``` this would help us to even test the rag system
-
+    
 a rag system would be developed with the system we have made
 
 

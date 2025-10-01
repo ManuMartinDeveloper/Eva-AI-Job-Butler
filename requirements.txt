@@ -29,7 +29,7 @@ sentence-transformers
 python-dotenv
 
 # For GitHub API interactions
-github
+PyGithub
 
 # For scraping jobs
 python-jobspy
