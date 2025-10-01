@@ -1,4 +1,4 @@
 credentials.json
 venv/
 .env
-# data/jobs/
+data/jobs/
