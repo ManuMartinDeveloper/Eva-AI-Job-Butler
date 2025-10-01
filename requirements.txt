@@ -1,0 +1,43 @@
+# Backend and Orchestration
+fastapi
+uvicorn
+langchain
+langchain-community
+langchain-core
+langchain_ollama
+
+# Database and Memory
+chromadb
+sqlalchemy
+
+# Browser Automation
+playwright
+
+# Frontend
+streamlit
+
+# Scheduler
+apscheduler
+
+# LLM Integration
+ollama
+
+# For local embeddings
+sentence-transformers
+
+# For environment variable management
+python-dotenv
+
+# For GitHub API interactions
+github
+
+# For scraping jobs
+python-jobspy
+
+# resume
+reportlab
+
+#google-api-python-client
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
