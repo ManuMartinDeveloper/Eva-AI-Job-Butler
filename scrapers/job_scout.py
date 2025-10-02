@@ -42,7 +42,7 @@ def get_full_job_description(job_url: str) -> str:
         page = context.new_page()
         print('launched with existing session data')
         try:
-            page.goto(job_url, timeout=600000)
+            page.goto(job_url, timeout=600000000)
             
             # --- This is the part you MUST customize for each job site ---
             if "linkedin.com" in job_url:

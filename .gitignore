@@ -2,6 +2,8 @@ credentials.json
 venv/
 .env
 data/jobs_details/
+data/chrome_data/
 data/job_seeker.db
 data/playwright_session/
 learnings/
+token.json
