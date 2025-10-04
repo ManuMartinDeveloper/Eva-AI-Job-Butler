@@ -80,14 +80,10 @@ def query_rag(job_title, job_desc="", doc_type="cover_letter"):
         ---
         """,
         "resume": f"""{persona_prompt}
-        Based ONLY on the user profile below, generate a tailored 'Professional Summary' (2 sentences) and a 'Key Skills' section (6 bullet points) for a resume targeted at the job of '{job_title}'.
+        Based ONLY on the user profile below, generate a tailored 'Professional Summary' (2 sentences), a 'Key Skills' section (6 bullet points), a 'Key Projects' section (5 most relavent projects with small description about each project), 'Education' section with all the education backgroud with the year of completion (You shall not alter the education and course informations, Do not halucinate this information), 'Experience' section incluse the professional Jobs done for a resume targeted at the job of '{job_title}'.
         USER PROFILE:
         ---
         {context}
-        ---
-        JOB DESCRIPTION:
-        ---
-        {job_desc}
         ---
         """
     }

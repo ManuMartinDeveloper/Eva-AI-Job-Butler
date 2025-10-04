@@ -25,7 +25,7 @@ if st.button("Ingest Profile"):
 # selected_job = None
 doc_type = "resume"
 # selected_job = pd.DataFrame()
-# response = ""
+response = ""
 
 # if st.button("Search Jobs"):
 # with st.spinner("Scraping jobs..."):
