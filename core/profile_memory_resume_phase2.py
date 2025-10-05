@@ -4,7 +4,6 @@ import streamlit as st
 import chromadb
 from langchain_ollama.llms import OllamaLLM
 import os
-import re
 
 # --- Setup Paths ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -86,7 +85,7 @@ def generate_document_and_reasoning(job_title: str, job_desc: str, doc_type: str
     
     # 3. Parse the output
     document = raw_response
-    reasoning = "No reasoning was generated."
+    reasoning = "Initialization "
     
     if "**Reasoning**" in raw_response:
         parts = raw_response.split("**Reasoning**")
@@ -100,5 +99,8 @@ def generate_document_and_reasoning(job_title: str, job_desc: str, doc_type: str
         parts = raw_response.split("###Reasoning")
         document = parts[0].strip()
         reasoning = parts[1].strip()
+    else:
+        reasoning = "No reasoning was generated."
+
         
     return {"document": document, "reasoning": reasoning}

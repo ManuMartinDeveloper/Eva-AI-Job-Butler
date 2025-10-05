@@ -107,8 +107,8 @@ if 'document_draft' in st.session_state and st.session_state.document_draft:
             # --- Fill Template and Convert ---
             doc = docx.Document(template_path)
             sections_to_fill = parse_ai_response_for_template_hastag(edited_text)
-            print(f"edited_text: {edited_text}")  # Print first 500 chars for brevity
-            print(f"Sections to fill: {sections_to_fill}")
+            # print(f"edited_text: {edited_text}")                  # For debugging
+            # print(f"Sections to fill: {sections_to_fill}")        # For debugging
             if not sections_to_fill:
                 sections_to_fill = parse_ai_response_for_template_stars(edited_text)
                 print(f"Sections to fill after stars parsing: {sections_to_fill}")

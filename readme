@@ -5,5 +5,13 @@ input the data in the core\ingest.py module and then excecute the core\ingest.py
     
 a rag system would be developed with the system we have made
 
+Eva AI Job Butler is a personal, intelligent assistant designed to automate and streamline the job search process.
 
+At its core, the Butler uses a **Retrieval-Augmented Generation (RAG)** system. It begins by creating a deep, personalized knowledge base—its "Profile Memory"—by ingesting your resume details and dynamically fetching your latest work from GitHub.
+
+The workflow is managed through a **Streamlit dashboard**:
+1.  **Job Scouting:** The assistant uses tools like `jobspy` to find relevant job openings and then employs a scraper to get the full job descriptions.
+2.  **AI-Powered Tailoring:** Using a local AI model (Phi-3/4), it intelligently queries its Profile Memory to generate a tailored resume and cover letter that are perfectly matched to the job description. It also provides its reasoning for the choices it made.
+3.  **Professional Formatting:** The generated text is inserted into a professional `.docx` template to ensure the final output is well-formatted and ATS-friendly.
+4.  **Human Approval:** You, the user, can then review, edit, and approve the AI-generated drafts in the dashboard before finalizing them into professional PDF documents ready for application.
 
