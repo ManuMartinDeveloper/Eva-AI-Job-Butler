@@ -18,17 +18,57 @@ from core.profile_memory_resume_phase2 import generate_document_and_reasoning
 
 # --- Robust Template and Parsing Functions ---
 
+# def replace_text_in_document(doc, placeholder, content):
+#     """Finds and replaces a placeholder in all paragraphs and table cells."""
+#     for table in doc.tables:
+#         for row in table.rows:
+#             for cell in row.cells:
+#                 for para in cell.paragraphs:
+#                     if placeholder in para.text:
+#                         para.text = para.text.replace(placeholder, content)
+#     for para in doc.paragraphs:
+#         if placeholder in para.text:
+#             para.text = para.text.replace(placeholder, content)
+
 def replace_text_in_document(doc, placeholder, content):
-    """Finds and replaces a placeholder in all paragraphs and table cells."""
+    """
+    Finds and replaces a placeholder, correctly applying bold formatting
+    for any text surrounded by double asterisks (e.g., **text**).
+    """
+    # This helper function does the complex work of adding formatted text
+    def add_formatted_text(paragraph, text):
+        # Split the text by the bold markers, keeping the markers
+        parts = re.split(r'(\*\*.*?\*\*)', text)
+        for part in parts:
+            if part.startswith('**') and part.endswith('**'):
+                # If the part is marked for bold, add it as a bold run
+                # and remove the asterisks
+                run = paragraph.add_run(part[2:-2])
+                run.bold = True
+            else:
+                # Otherwise, add it as a normal run
+                run = paragraph.add_run(part)
+
+    # --- Main logic to search the whole document ---
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
                     if placeholder in para.text:
-                        para.text = para.text.replace(placeholder, content)
+                        # Clear the placeholder text
+                        para.text = ""
+                        # Add the new, formatted content line by line
+                        for line in content.split('\n'):
+                            add_formatted_text(para, line)
+                            para.add_run('\n') # Add line breaks back
+
     for para in doc.paragraphs:
         if placeholder in para.text:
-            para.text = para.text.replace(placeholder, content)
+            para.text = ""
+            for line in content.split('\n'):
+                add_formatted_text(para, line)
+                para.add_run('\n')
+
 
 def parse_ai_response_for_template_stars(text: str) -> dict:
     """Parses the AI's markdown-style output into a dictionary for the template."""
