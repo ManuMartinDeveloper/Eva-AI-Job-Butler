@@ -42,3 +42,11 @@ reportlab
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
+
+#file and document handling
+dramatiq
+
+#ATS templating
+python-docx
+docx2pdf
+pywin32

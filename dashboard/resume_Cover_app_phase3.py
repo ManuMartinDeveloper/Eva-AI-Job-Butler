@@ -1,65 +1,132 @@
-import sys
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# dashboard/main_app.py
 
 import streamlit as st
-import pandas as pd
-import sqlite3
-from scrapers.job_scout import fetch_and_save_jobs
-from core.profile_memory_resume_phase2 import query_rag, ingest_and_embed
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from datetime import datetime
+import os
+import re
+import docx
+from docx2pdf import convert
+import pythoncom
 
-st.title("AI Job Butler Dashboard")
+# --- Setup Paths ---
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
+OUTPUTS_DIR = os.path.join(_PROJECT_ROOT, "outputs")
+DATA_DIR = os.path.join(_PROJECT_ROOT, "data")
 
-if st.button("Ingest Profile"):
-    ingest_and_embed(clear_existing=True)
-    st.success("Profile ingested and embedded!")
+# --- Import your new AI function ---
+from core.profile_memory_resume_phase2 import generate_document_and_reasoning
 
-# st.subheader("Job Scout with JobSpy")
-# search_term = st.text_input("Job Title (e.g., AIML Engineer)")
-# location = st.text_input("Location (e.g., Bengaluru)")
-# results_wanted = st.slider("Max Results", 5, 50, 20)
+# --- Robust Template and Parsing Functions ---
 
-# selected_job = None
-doc_type = "resume"
-# selected_job = pd.DataFrame()
-response = ""
+def replace_text_in_document(doc, placeholder, content):
+    """Finds and replaces a placeholder in all paragraphs and table cells."""
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    if placeholder in para.text:
+                        para.text = para.text.replace(placeholder, content)
+    for para in doc.paragraphs:
+        if placeholder in para.text:
+            para.text = para.text.replace(placeholder, content)
 
-# if st.button("Search Jobs"):
-# with st.spinner("Scraping jobs..."):
-#         jobs_df = fetch_and_save_jobs(search_term, location, results_wanted)
-#         if not jobs_df.empty:
-#             st.dataframe(jobs_df)
-#             conn = sqlite3.connect("data/job_seeker.db")
-#             sql_jobs = pd.read_sql_query("SELECT * FROM jobs ORDER BY scrape_date DESC LIMIT 20", conn)
-#             conn.close()
-#             st.subheader("Recent Jobs from DB")
-#             st.dataframe(sql_jobs)
+def parse_ai_response_for_template_stars(text: str) -> dict:
+    """Parses the AI's markdown-style output into a dictionary for the template."""
+    sections = {}
+    headers = ["Professional Summary", "Key Skills", "Relevant Projects", "Key Projects", "Relevant Experience", "Experience"]
+    pattern = r"\*\*((" + "|".join(headers) + r"))\*\*"
+    parts = re.split(pattern, text)
+    for i in range(1, len(parts), 3):
+        header = parts[i].strip()
+        content = parts[i+2].strip()
+        if "summary" in header.lower(): sections['{{SUMMARY}}'] = content
+        elif "skills" in header.lower(): sections['{{SKILLS}}'] = content
+        elif "projects" in header.lower(): sections['{{PROJECTS}}'] = content
+        elif "experience" in header.lower(): sections['{{EXPERIENCE}}'] = content
+    return sections
 
-#             selected_idx = st.selectbox("Select Job to Tailor", range(len(jobs_df)))
-#             selected_job = jobs_df.iloc[selected_idx]
-#             doc_type = st.selectbox("Document Type", ["cover_letter", "resume"])
-job_desc = st.text_area("Paste Job Description", height=200)
+def parse_ai_response_for_template_hastag(text: str) -> dict:
+    """Parses the AI's markdown-style output into a dictionary for the template."""
+    sections = {}
+    headers = ["Professional Summary", "Key Skills", "Relevant Projects", "Key Projects", "Relevant Experience", "Experience"]
+    pattern = r"\#\#\# ((" + "|".join(headers) + r"))"
+    # print(f"pattern: {pattern}")
+    parts = re.split(pattern, text)
+    # print(f"part: {parts}")
+    # print(f"len(parts): {len(parts)}")
+    for i in range(1, len(parts), 3):
+        header = parts[i].strip()
+        content = parts[i+2].strip()
+        if "summary" in header.lower(): sections['{{SUMMARY}}'] = content
+        elif "skills" in header.lower(): sections['{{SKILLS}}'] = content
+        elif "projects" in header.lower(): sections['{{PROJECTS}}'] = content
+        elif "experience" in header.lower(): sections['{{EXPERIENCE}}'] = content
+    return sections
 
-if st.button("Tailor Document"):
-    # job_desc = selected_job.get('description', selected_job.get('title', ''))    
-    response = query_rag(f"Generate tailored {doc_type}", job_desc, doc_type)
-    st.text_area("Tailored Output", response, height=300)
 
-# PDF Export
-if st.button("Export to PDF"):
-    output_path = f"tailored_{doc_type}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-    c = canvas.Canvas(output_path, pagesize=letter)
-    print(response)
-    c.drawString(100, 750, response)
-    c.save()
-    st.success(f"PDF saved as {output_path}")
-    st.download_button("Download PDF", open(output_path, "rb").read(), file_name=output_path)
-    #         else:
-    #             st.warning("No jobs found. Try different terms.")
-    # else:
-    #     st.write("Enter search term and location.")
 
-# ... Cold Email section (unchanged for now) ...
+# --- Streamlit App ---
+st.set_page_config(layout="wide")
+st.title("🤖 Eva - AI Job Butler")
+
+# --- UI for Job Input ---
+st.header("1. Job Details")
+job_title = st.text_input("Job Title", "AI Engineer")
+company_name = st.text_input("Company Name", "Tech Innovations Inc.")
+job_desc_input = st.text_area("Paste Full Job Description", height=200)
+
+if st.button("✨ Generate Draft"):
+    if job_desc_input and job_title:
+        with st.spinner("Eva is reasoning and crafting your draft..."):
+            response_dict = generate_document_and_reasoning(job_title, job_desc_input, "resume")
+            st.session_state.document_draft = response_dict.get('document', '')
+            st.session_state.reasoning = response_dict.get('reasoning', '')
+    else:
+        st.warning("Please provide a Job Title and Description.")
+
+# --- UI for Editing and Approval ---
+if 'document_draft' in st.session_state and st.session_state.document_draft:
+    st.header("2. Review and Edit Draft")
+    edited_text = st.text_area("Document Editor", st.session_state.document_draft, height=400)
+    
+    with st.expander("Show Eva's Reasoning 💡"):
+        st.info(st.session_state.reasoning)
+
+    st.header("3. Finalize and Export")
+    if st.button("✅ Approve and Generate Final PDF"):
+        try:
+            # --- File Paths ---
+            template_path = os.path.join(DATA_DIR, "Manu_Martin_Resume_Template1.docx")
+            company_folder = re.sub(r'[\\/*?:"<>|]', "", company_name)
+            job_folder = re.sub(r'[\\/*?:"<>|]', "", job_title)
+            final_dir = os.path.join(OUTPUTS_DIR, company_folder, job_folder)
+            os.makedirs(final_dir, exist_ok=True)
+            temp_docx_path = os.path.join(final_dir, "temp.docx")
+            final_pdf_path = os.path.join(final_dir, f"final_resume.pdf")
+
+            # --- Fill Template and Convert ---
+            doc = docx.Document(template_path)
+            sections_to_fill = parse_ai_response_for_template_hastag(edited_text)
+            print(f"edited_text: {edited_text}")  # Print first 500 chars for brevity
+            print(f"Sections to fill: {sections_to_fill}")
+            if not sections_to_fill:
+                sections_to_fill = parse_ai_response_for_template_stars(edited_text)
+                print(f"Sections to fill after stars parsing: {sections_to_fill}")
+
+            for placeholder, content in sections_to_fill.items():
+                replace_text_in_document(doc, placeholder, content)
+
+            doc.save(temp_docx_path)
+            
+            pythoncom.CoInitialize()
+            convert(temp_docx_path, final_pdf_path)
+            os.remove(temp_docx_path)
+            
+            st.success(f"Final PDF saved to: {final_pdf_path}")
+            with open(final_pdf_path, "rb") as pdf_file:
+                st.download_button("Download Final PDF", pdf_file.read(), file_name=f"final_resume.pdf")
+                
+        except Exception as e:
+            st.error(f"Failed to generate document. Error: {e}")
+        finally:
+            pythoncom.CoUninitialize()

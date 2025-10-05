@@ -26,60 +26,81 @@ LINKEDIN_EMAIL = os.getenv("LINKEDIN_EMAIL")
 LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD")
 
 # --- Deep Scraping with Playwright ---
-def get_full_job_description(job_url: str) -> str:
-    """
-    Visits a job URL using Playwright and scrapes the full job description text.
-    NOTE: This requires custom selectors for each job site (LinkedIn, Indeed, etc.).
-    """
-    print(f"Performing deep scrape for URL: {job_url}")
-    description = "Could not retrieve full description."
+# def get_full_job_description(job_url: str) -> str:
+#     """
+#     Visits a job URL using Playwright and scrapes the full job description text.
+#     NOTE: This requires custom selectors for each job site (LinkedIn, Indeed, etc.).
+#     """
+#     print(f"Performing deep scrape for URL: {job_url}")
+#     description = "Could not retrieve full description."
     
-    with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=SESSION_DATA_PATH,
-            headless=False # Can now run in the background
-        )
-        page = context.new_page()
-        print('launched with existing session data')
-        try:
-            page.goto(job_url, timeout=600000000)
+#     with sync_playwright() as p:
+#         context = p.chromium.launch_persistent_context(
+#             user_data_dir=SESSION_DATA_PATH,
+#             headless=False # Can now run in the background
+#         )
+#         page = context.new_page()
+#         print('launched with existing session data')
+#         try:
+#             page.goto(job_url, timeout=600000000)
             
-            # --- This is the part you MUST customize for each job site ---
-            if "linkedin.com" in job_url:
-                # page.goto(job_url, timeout=60000)
-                show_more_button = page.locator("button[aria-label='Click to see more description']")
-                if show_more_button:
-                    show_more_button.click()
+#             # --- This is the part you MUST customize for each job site ---
+#             if "linkedin.com" in job_url:
+#                 # page.goto(job_url, timeout=60000)
+#                 show_more_button = page.locator("button[aria-label='Click to see more description']")
+#                 if show_more_button:
+#                     show_more_button.click()
                 
-                # The selector for the main description content on LinkedIn
-                description_locator = page.locator("div.jobs-description__content.jobs-description-content.jobs-description__content--condensed")
+#                 # The selector for the main description content on LinkedIn
+#                 description_locator = page.locator("div.jobs-description__content.jobs-description-content.jobs-description__content--condensed")
                 
-                description = description_locator.inner_text()
+#                 description = description_locator.inner_text()
             
-            elif "indeed.com" in job_url:
-                # The selector for the job description on Indeed
-                description_locator = page.locator("div#jobDescriptionText")
-                description = description_locator.inner_text()
+#             elif "indeed.com" in job_url:
+#                 # The selector for the job description on Indeed
+#                 description_locator = page.locator("div#jobDescriptionText")
+#                 description = description_locator.inner_text()
             
-            elif "glassdoor.com" in job_url:
-                show_more_button = page.locator("button[aria-label='Show more, visually expand the content']")
-                if show_more_button:
-                    show_more_button.click()
+#             elif "glassdoor.com" in job_url:
+#                 show_more_button = page.locator("button[aria-label='Show more, visually expand the content']")
+#                 if show_more_button:
+#                     show_more_button.click()
 
-                # The selector for the job description on Glassdoor
-                description_locator = page.locator("div.JobDetails_jobDescription__uW_fK.JobDetails_showHidden__C_FOA")
-                description = description_locator.inner_text()
+#                 # The selector for the job description on Glassdoor
+#                 description_locator = page.locator("div.JobDetails_jobDescription__uW_fK.JobDetails_showHidden__C_FOA")
+#                 description = description_locator.inner_text()
+        # except PlaywrightTimeoutError:
+        #     print(f"Timeout while trying to load {job_url}")
+        # except Exception as e:
+        #     print(f"An error occurred during deep scrape: {e}")
+        # finally:
+        #     context.close()
+                
+        # return description
 
-            # Add more 'elif' blocks for other sites like Glassdoor, Naukri, etc.
 
-        except PlaywrightTimeoutError:
-            print(f"Timeout while trying to load {job_url}")
-        except Exception as e:
-            print(f"An error occurred during deep scrape: {e}")
-        finally:
-            context.close()
+#             # Add more 'elif' blocks for other sites like Glassdoor, Naukri, etc.
+def get_full_job_description_connected(page, job_url: str) -> str:
+    """Uses an EXISTING page to scrape a URL."""
+    try:
+        page.goto(job_url, timeout=60000)
+        # --- (Your site-specific selectors for LinkedIn, Indeed, etc. go here) ---
+        if "linkedin.com" in job_url:
+            show_more_button = page.locator("button[aria-label='Click to see more description']")
+            if show_more_button:
+                show_more_button.click()
             
-    return description
+            # The selector for the main description content on LinkedIn
+            description_locator = page.locator("div.jobs-description__content.jobs-description-content.jobs-description__content--condensed")
+            
+            description = description_locator.inner_text()        # ... add other sites
+            return description
+        else:
+            return f"Site not supported for deep scraping. URL: {job_url}"
+    except Exception as e:
+        print(f"Error scraping {job_url}: {e}")
+        return "Could not retrieve full description."
+
 
 
 # --- Job Scraping and Storage ---
@@ -102,13 +123,33 @@ def fetch_and_save_jobs(search_term="AIML Engineer", location="Bengaluru", resul
         return pd.DataFrame()
     
     # Dedupe by title + company
-    jobs_deduped = jobs.drop_duplicates(subset=["title", "company"])
-    
+    jobs_deduped = jobs.drop_duplicates(subset=["title", "company"]).reset_index()
+
+
+    # --- 2. Perform deep scrape using a connected browser ---
+    descriptions = []
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.connect_over_cdp("http://localhost:9222")
+            context = browser.contexts[0]
+            page = context.new_page()
+
+            for index, row in jobs_deduped.iterrows():
+                desc = get_full_job_description_connected(page, row['job_url'])
+                descriptions.append(desc)
+
+            page.close()
+            jobs_deduped['description'] = descriptions
+        except Exception as e:
+            print(f"CRITICAL ERROR: Could not connect to browser. Is it running with the debug port? Error: {e}")
+            # Still return the partial data from jobspy
+            return jobs_deduped
+
     # Deep scrape job descriptions
-    jobs_deduped['description'] = jobs_deduped.apply(
-        lambda row: get_full_job_description(row['job_url']) if pd.isna(row.get('description')) or len(row.get('description', '')) < 100 else row['description'],
-        axis=1
-    )
+    # jobs_deduped['description'] = jobs_deduped.apply(
+    #     lambda row: get_full_job_description_connected(row['job_url']) if pd.isna(row.get('description')) or len(row.get('description', '')) < 100 else row['description'],
+    #     axis=1
+    # )
 
     # Save to CSV
     filename = f"job_leads_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
