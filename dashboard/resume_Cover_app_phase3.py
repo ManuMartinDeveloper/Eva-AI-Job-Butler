@@ -1,4 +1,4 @@
-# dashboard/main_app.py
+# dashboard/resume_Cover_app_phase3.py
 
 import streamlit as st
 import os
