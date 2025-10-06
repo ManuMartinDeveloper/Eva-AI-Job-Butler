@@ -151,7 +151,7 @@ if 'document_draft' in st.session_state and st.session_state.document_draft:
             # print(f"Sections to fill: {sections_to_fill}")        # For debugging
             if not sections_to_fill:
                 sections_to_fill = parse_ai_response_for_template_stars(edited_text)
-                print(f"Sections to fill after stars parsing: {sections_to_fill}")
+                # print(f"Sections to fill after stars parsing: {sections_to_fill}")
 
             for placeholder, content in sections_to_fill.items():
                 replace_text_in_document(doc, placeholder, content)

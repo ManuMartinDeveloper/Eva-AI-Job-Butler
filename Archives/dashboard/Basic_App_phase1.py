@@ -22,6 +22,7 @@ from core.profile_memory_initial_phase1 import ingest_and_embed, query_rag
 st.title("AI Job Butler Dashboard")
 if st.button("Ingest Profile"):
     ingest_and_embed(clear_existing=True)  # Initial ingest
+    
     st.success("Profile ingested and embedded!")
 
 job_desc = st.text_area("Ask any question from the profile and shall try to answer it from the chromaDB", height=200)

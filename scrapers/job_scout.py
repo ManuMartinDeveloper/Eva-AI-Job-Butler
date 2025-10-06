@@ -5,6 +5,8 @@ import os
 import sqlite3
 import csv
 import pandas as pd
+import argparse
+import time
 from jobspy import scrape_jobs
 from datetime import datetime
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeoutError
@@ -84,6 +86,7 @@ def get_full_job_description_connected(page, job_url: str) -> str:
     """Uses an EXISTING page to scrape a URL."""
     try:
         page.goto(job_url, timeout=60000)
+        time.sleep(3)
         # --- (Your site-specific selectors for LinkedIn, Indeed, etc. go here) ---
         if "linkedin.com" in job_url:
             show_more_button = page.locator("button[aria-label='Click to see more description']")
@@ -95,6 +98,15 @@ def get_full_job_description_connected(page, job_url: str) -> str:
             
             description = description_locator.inner_text()        # ... add other sites
             return description
+        elif 'glassdoor' in job_url:
+            description_locator = page.locator("div.JobDetails_jobDescription__uW_fK.JobDetails_blurDescription__vN7nh")
+            description = description_locator.inner_text()
+            # apply_on_employer_site = page.locator("button[aria-label='Apply on employer site']")
+            # if show_more_button:
+            #     show_more_button.click()
+            if not description:
+                description_locator = page.locator("div.JobDetails_jobDescription__uW_fK.JobDetails_showHidden__C_FOA")
+                description = description_locator.inner_text()
         else:
             return f"Site not supported for deep scraping. URL: {job_url}"
     except Exception as e:
@@ -110,12 +122,12 @@ def fetch_and_save_jobs(search_term="AIML Engineer", location="Bengaluru", resul
     Fetches jobs using JobSpy, saves to SQLite and CSV, dedupes by title + company.
     """
     jobs = scrape_jobs(
-        site_name=["indeed", "linkedin", "glassdoor", "google"],  # Add "naukri", "zip_recruiter" for India focus
+        site_name=["indeed", "linkedin", "google"],  # Add "naukri", "glassdoor", "zip_recruiter" for India focus
         search_term=search_term,
         location=location,
         results_wanted=results_wanted,
         hours_old=hours_old,
-        country_indeed="India",  # For Indeed geo
+        country_indeed="United Arab Emirates",  # For Indeed geo
         # proxies=["http://proxy1:port", "http://proxy2:port"]  # If needed
     )
     if jobs.empty:
@@ -197,5 +209,10 @@ def fetch_and_save_jobs(search_term="AIML Engineer", location="Bengaluru", resul
     return jobs_deduped
 
 if __name__ == "__main__":
-    df = fetch_and_save_jobs()
-    print(df.head())  # Preview
+    parser = argparse.ArgumentParser(description="Scrape job listings.")
+    parser.add_argument("--search", type=str, default="AI Engineer", help="Job search term")
+    parser.add_argument("--location", type=str, default="Bengaluru", help="Job location")
+    args = parser.parse_args()
+    
+    print(f"--- Running job scout manually for {args.search} in {args.location} ---")
+    fetch_and_save_jobs(search_term=args.search, location=args.location, results_wanted=20)

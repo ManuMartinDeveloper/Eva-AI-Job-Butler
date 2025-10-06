@@ -308,6 +308,7 @@ def ingest_profile():
 
 
 
+
 # --- Main Execution Block ---
 if __name__ == "__main__":
     print("--- RAG Pipeline Started ---")

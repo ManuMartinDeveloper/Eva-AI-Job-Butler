@@ -41,9 +41,9 @@ def ingest_and_embed(clear_existing=False):
     from .ingest import ingest_profile
     ingest_profile()
 
-def ingest_and_embed(clear_existing=False):
+# def ingest_and_embed(clear_existing=False):
     # Run your ingestion pipeline
-    ingest_profile()  # Update with GitHub projects, save to SQLite, embed in ChromaDB
+    # ingest_profile()  # Update with GitHub projects, save to SQLite, embed in ChromaDB
     # Note: Your code already handles this; just call it here
 
 def query_rag(query, job_desc=""):
