@@ -1,4 +1,5 @@
-2025-10-02 13:13:56,197 - GitHub API error: 401 {"message": "Bad credentials", "documentation_url": "https://docs.github.com/rest", "status": "401"}
-2025-10-02 13:43:06,504 - GitHub API error: 401 {"message": "Bad credentials", "documentation_url": "https://docs.github.com/rest", "status": "401"}
-2025-10-02 13:45:54,426 - GitHub API error: 401 {"message": "Bad credentials", "documentation_url": "https://docs.github.com/rest", "status": "401"}
-2025-10-02 22:49:06,388 - GitHub API error: 401 {"message": "Bad credentials", "documentation_url": "https://docs.github.com/rest", "status": "401"}
+2026-05-21 22:19:21,822 - Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-21 22:19:42,567 - Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-21 22:49:23,096 - Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-21 22:49:46,838 - Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-21 22:52:14,165 - GitHub API error: 401 {"message": "Bad credentials", "documentation_url": "https://docs.github.com/rest", "status": "401"}

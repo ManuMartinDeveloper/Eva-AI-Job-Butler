@@ -13,6 +13,7 @@ import pythoncom
 from st_aggrid import AgGrid, GridOptionsBuilder
 import subprocess
 import sys
+from langchain_core.messages.ai import AIMessage
 
 # --- Setup Paths ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -22,8 +23,8 @@ JOBS_DIR = os.path.join(_PROJECT_ROOT, "data", "jobs_details")
 DATA_DIR = os.path.join(_PROJECT_ROOT, "data")
 
 # --- Import your AI functions ---
-from core.profile_memory_resume_phase2 import generate_resume_and_reasoning, generate_coverletter_and_reasoning, ingest_and_embed
-
+# from core.profile_memory_resume_phase2 import generate_resume_and_reasoning, generate_coverletter_and_reasoning, ingest_and_embed
+from core.API_LLM_Based_Document_Generation import generate_resume_and_reasoning, generate_coverletter_and_reasoning, ingest_and_embed
 # --- Robust Parsing and Template Functions ---
 def get_latest_csv_file(path):
     """Finds the most recently created CSV file in a directory."""
@@ -175,8 +176,7 @@ with first_col1:
             height=400,
             width='100%',
             allow_unsafe_jscode=True,
-            # enable_enterprise_modules=False,
-            # update_on=['selection_changed'],
+
             fit_columns_on_grid_load=True,
             theme='streamlit'
         )
@@ -186,7 +186,7 @@ with first_col1:
         selected = grid_response['selected_rows']
         st.write("Selected:", selected)
 
-        print(f"selected_rows: {selected_rows}")
+        # print(f"selected_rows: {selected_rows}")
         if selected_rows is not None and not selected_rows.empty:
             # When a row is clicked, store its data in session state
             selected_job_data = selected_rows.to_dict('records')[0]

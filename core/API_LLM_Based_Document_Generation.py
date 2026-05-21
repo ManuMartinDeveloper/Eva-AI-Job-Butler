@@ -1,0 +1,211 @@
+# core/API_LLM_Based_Document_Generation.py
+
+import streamlit as st
+import chromadb
+from langchain_google_genai import ChatGoogleGenerativeAI
+import os
+from dotenv import load_dotenv
+
+# --- Setup Paths ---
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
+CHROMA_PATH = os.path.join(_PROJECT_ROOT, 'data', 'chroma_data')
+
+load_dotenv()
+
+# --- Cached Resource Loading ---
+@st.cache_resource
+def get_llm():
+    """Loads the LLM from the Google Gemini API."""
+    print("Initializing Google Gemini LLM...")
+    if not os.getenv("GOOGLE_API_KEY"):
+        raise ValueError("GOOGLE_API_KEY not found in .env file. Please add it.")
+        
+    return ChatGoogleGenerativeAI(
+        model="gemma-3n-e2b-it",
+        temperature=0.7 # Adjust for more or less creative responses
+    )
+
+
+@st.cache_resource
+def get_chroma_client():
+    print("Initializing ChromaDB client...")
+    return chromadb.PersistentClient(path=CHROMA_PATH)
+
+# --- The Main Generation Function ---
+def ingest_and_embed(clear_existing=False):
+    from .ingest import ingest_profile
+    ingest_profile()
+
+def generate_resume_and_reasoning(job_title: str, job_desc: str) -> dict:
+    """
+    A direct RAG function that generates both the document text and the AI's reasoning.
+    """
+    llm = get_llm()
+    client = get_chroma_client()
+
+    # 1. Intelligent RAG Context Retrieval
+    query_map = {
+        "skills": f"Relevant skills for a '{job_title}' role?",
+        "experience": f"Past job experiences relevant to: {job_desc}?",
+        "projects": f"Projects that showcase skills for this job: {job_desc}?"
+    }
+    context = ""
+    for coll_name, query in query_map.items():
+        try:
+            collection = client.get_collection(coll_name)
+            results = collection.query(query_texts=[query], n_results=3)
+            if results and results.get('documents'):
+                context += f"## Relevant {coll_name}:\n" + "\n".join(results['documents'][0]) + "\n\n"
+        except Exception as e:
+            print(f"Error querying collection '{coll_name}': {e}")
+    
+    if not context:
+        return {"document": "Error: No profile data found.", "reasoning": "Failed to retrieve context from ChromaDB."}
+
+    # 2. Direct Instruction Prompting for Structured Text
+    persona_prompt = "You are Manu's AI Job butler, an expert career coach for Manu Martin. Your tone is professional and achievement-oriented. You must get Manu the Job in this company. Never leave any placeholder, fill them with all the relevant informations"
+    
+    resume_prompt = f"""{persona_prompt}
+    Based ONLY on the user profile below, generate the content for a resume targeted at the job of '{job_title}'.
+
+    You MUST GENERATE the following sections. each section should start with a header formatted as ### Section Title
+    1. ### Professional Summary
+    2. ### Key Skills
+    3. ### Relevant Experience
+    4. ### Key Projects
+
+    Do NOT include an 'Education' section.
+
+
+    USER PROFILE:
+    ---
+    {context}
+    ---
+    JOB DESCRIPTION:
+    ---
+    {job_desc}
+    ---
+
+    After generating the resume sections, add a final section titled **Reasoning** and explain, in 2-3 sentences, why you chose the specific skills and projects for this job.
+    """
+    
+    # (You can create a similar high-quality prompt for "cover_letter")
+    
+    
+    print("--- [AI Core] Generating document text and reasoning... ---")
+    raw_response = llm.invoke(resume_prompt)
+    raw_document = raw_response.content
+    # 3. Parse the output
+    document = raw_response.content
+    reasoning = "Initialization "
+    
+    if "**Reasoning**" in raw_document:
+        parts = raw_document.split("**Reasoning**")
+        document = parts[0].strip()
+        reasoning = parts[1].strip()
+    if "**Reasoning:**" in raw_document:
+        parts = raw_document.split("**Reasoning:**")
+        document = parts[0].strip()
+        reasoning = parts[1].strip()
+    elif "### Reasoning" in raw_document:
+        parts = raw_document.split("### Reasoning")
+        document = parts[0].strip()
+        reasoning = parts[1].strip()
+    elif "### Reasoning:" in raw_document:
+        parts = raw_document.split("### Reasoning:")
+        document = parts[0].strip()
+        reasoning = parts[1].strip()
+    elif "###Reasoning" in raw_document:
+        parts = raw_document.split("###Reasoning")
+        document = parts[0].strip()
+        reasoning = parts[1].strip()
+    else:
+        reasoning = "No reasoning was generated."
+
+        
+    return {"document": document, "reasoning": reasoning}
+
+def generate_coverletter_and_reasoning(job_title: str, job_desc: str) -> dict:
+    """
+    A direct RAG function that generates a cover letter and the AI's reasoning.
+    """
+    llm = get_llm()
+    client = get_chroma_client()
+
+    # 1. Intelligent RAG Context Retrieval (This logic is reused)
+    query_map = {
+        "skills": f"Relevant skills for a '{job_title}' role?",
+        "experience": f"Past job experiences relevant to: {job_desc}?",
+        "projects": f"Projects that showcase skills for this job: {job_desc}?"
+    }
+    context = ""
+    for coll_name, query in query_map.items():
+        try:
+            collection = client.get_collection(coll_name)
+            results = collection.query(query_texts=[query], n_results=3)
+            if results and results.get('documents'):
+                context += f"## Relevant {coll_name}:\n" + "\n".join(results['documents'][0]) + "\n\n"
+        except Exception as e:
+            print(f"Error querying collection '{coll_name}': {e}")
+    
+    if not context:
+        return {"document": "Error: No profile data found.", "reasoning": "Failed to retrieve context from ChromaDB."}
+
+    # 2. NEW, Specialized Prompt for Cover Letters
+    persona_prompt = "Act as an expert career coach for Manu Martin. Your tone is professional, confident, and enthusiastic."
+    
+    cover_letter_prompt = f"""{persona_prompt}
+    Based ONLY on the user profile below, write a compelling 3-paragraph cover letter for the role of '{job_title}'. Keep the total word count under 200 words.
+
+    **Instructions**
+    1.  **Paragraph 1:** State the role you are applying for and express genuine enthusiasm for the company and the position, referencing a specific aspect of the job description.
+    2.  **Paragraph 2:** Highlight the SINGLE most relevant project or experience from the user's profile. Connect it directly to a key requirement in the job description to demonstrate value.
+    3.  **Paragraph 3:** Reiterate your interest, express confidence in your ability to contribute, and include a clear call to action (e.g., "I am eager to discuss how my skills in AI can benefit your team...").
+
+    USER PROFILE:
+    ---
+    {context}
+    ---
+    JOB DESCRIPTION:
+    ---
+    {job_desc}
+    ---
+
+    After generating the cover letter, add a final section titled **Reasoning** and explain, in 2-3 sentences, which key requirement you focused on and why the highlighted experience is a perfect match.
+    """
+    
+    prompt = cover_letter_prompt
+    
+    print("--- [AI Core] Generating cover letter and reasoning... ---")
+    raw_response = llm.invoke(prompt)
+    raw_document = raw_response.content
+    
+    # 3. Parse the output (This logic is reused)
+    document = raw_response.content
+    reasoning = "Initialization"
+    
+    if "**Reasoning**" in raw_document:
+        parts = raw_document.split("**Reasoning**")
+        document = parts[0].strip()
+        reasoning = parts[1].strip()
+    if "**Reasoning:**" in raw_document:
+        parts = raw_document.split("**Reasoning:**")
+        document = parts[0].strip()
+        reasoning = parts[1].strip()
+    elif "### Reasoning" in raw_document:
+        parts = raw_document.split("### Reasoning")
+        document = parts[0].strip()
+        reasoning = parts[1].strip()
+    elif "### Reasoning:" in raw_document:
+        parts = raw_document.split("### Reasoning:")
+        document = parts[0].strip()
+        reasoning = parts[1].strip()
+    elif "###Reasoning" in raw_document:
+        parts = raw_document.split("###Reasoning")
+        document = parts[0].strip()
+        reasoning = parts[1].strip()
+    else:
+        reasoning = "No reasoning was generated."
+        
+    return {"document": document, "reasoning": reasoning}

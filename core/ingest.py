@@ -79,7 +79,7 @@ def fetch_github_projects(username):
     """
     try:
         github_token = os.getenv("GITHUB_TOKEN")
-        print(f"{github_token} is the token")
+        # print(f"{github_token} is the token")
         # if not github_token:
         #     raise ValueError("GITHUB_TOKEN is required in .env for GitHub API access.")
         g = Github(github_token) if github_token else Github()

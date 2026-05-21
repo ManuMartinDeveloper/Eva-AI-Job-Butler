@@ -5,6 +5,8 @@ langchain
 langchain-community
 langchain-core
 langchain_ollama
+langchain-groq
+langchain-google-genai
 
 # Database and Memory
 chromadb
@@ -49,5 +51,3 @@ dramatiq
 
 #ATS templating
 python-docx
-docx2pdf
-pywin32

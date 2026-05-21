@@ -1,5 +1,5 @@
 credentials.json
-venv/
+.venv/
 .env
 data/jobs_details/
 data/chroma_data
@@ -7,3 +7,17 @@ data/job_seeker.db
 data/playwright_session/
 learnings/
 token.json
+.venv_win/
+Archives/dashboard/__pycache__/
+Archives/Phase1_Working/core/__pycache__/
+Archives/Phase1_Working/dashboard/__pycache__/
+tests/__pycache__/
+scrapers/__pycache__/
+dashboard/pages/__pycache__/
+dashboard/__pycache__/
+core/__pycache__/
+core/__pycache__/profile_memory_resume_phase1.cpython-311.pyc
+core/__pycache__/profile_memory_resume_phase2.cpython-311.pyc
+backend/routers/__pycache__/
+Archives/Phase1_Working/scrapers/__pycache__/
+backend/__pycache__/
