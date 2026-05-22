@@ -10,7 +10,7 @@ _PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
 sys.path.append(_PROJECT_ROOT)
 
 from core.db import init_db
-from backend.routers import jobs, profile, generate, agent, chat
+from backend.routers import jobs, profile, generate, agent, chat, auth
 
 app = FastAPI(
     title="Eva AI Job Butler API",
@@ -34,6 +34,7 @@ def startup_event():
     init_db()
 
 # Include routers
+app.include_router(auth.router)
 app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(profile.router, prefix="/api/profile", tags=["Profile"])
 app.include_router(generate.router, prefix="/api/generate", tags=["Document Generator"])

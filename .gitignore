@@ -21,3 +21,5 @@ core/__pycache__/profile_memory_resume_phase2.cpython-311.pyc
 backend/routers/__pycache__/
 Archives/Phase1_Working/scrapers/__pycache__/
 backend/__pycache__/
+node_modules/
+*.log

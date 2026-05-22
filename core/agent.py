@@ -34,13 +34,13 @@ class EvaAgent:
             self.is_running = False
             self.log_action("System", "Agent Stopped", "Success")
 
-    def log_action(self, action, details, status="Success"):
+    def log_action(self, action, details, status="Success", user_id=None):
         session = SessionLocal()
         try:
-            log = AgentLog(action=action, details=details, status=status)
+            log = AgentLog(user_id=user_id, action=action, details=details, status=status)
             session.add(log)
             session.commit()
-            print(f"[{datetime.now().strftime('%H:%M')}] {action}: {details}")
+            print(f"[{datetime.now().strftime('%H:%M')}] {action} (User {user_id}): {details}")
         except Exception as e:
             print(f"Error logging action: {e}")
         finally:
@@ -50,85 +50,134 @@ class EvaAgent:
     
     def task_scout_jobs(self):
         """
-        Runs the job scout script and imports results to the main DB.
+        Loops through all active users and runs the job scout script for each.
         """
-        self.log_action("Scout", "Starting scheduled job scout...", "Running")
-        try:
-            # Import here to avoid circular imports or early init
-            from scrapers.job_scout import fetch_and_save_jobs
-            
-            # Run the scout
-            jobs_df = fetch_and_save_jobs(results_wanted=20)
-            
-            if not jobs_df.empty:
-                # Sync with main DB
-                session = SessionLocal()
-                new_count = 0
-                for _, row in jobs_df.iterrows():
-                    # Check if exists
-                    exists = session.query(Job).filter_by(url=row['job_url']).first()
-                    if not exists:
-                        new_job = Job(
-                            title=row['title'],
-                            company=row['company'],
-                            location=row['location'],
-                            description=row['description'],
-                            url=row['job_url'],
-                            date_posted=str(row['date_posted']),
-                            salary=str(row['salary_source']),
-                            site=row['site'],
-                            email=str(row['emails'])
-                        )
-                        session.add(new_job)
-                        new_count += 1
-                session.commit()
-                session.close()
-                self.log_action("Scout", f"Scout complete. Found {new_count} new jobs.", "Success")
-                
-                # Automatically trigger evaluation for new jobs
-                self.task_evaluate_jobs()
-            else:
-                self.log_action("Scout", "Scout complete. No jobs found.", "Success")
-                
-        except Exception as e:
-            self.log_action("Scout", f"Scout failed: {str(e)}", "Failed")
-
-    def task_evaluate_jobs(self, provider="gemini", model_name=None):
-        """
-        Autonomous Agentic AI Reasoning Loop to evaluate unscored jobs using ReAct pattern.
-        """
-        self.log_action("Scout", "Autonomous Job Evaluation Cycle Started", "Running")
+        self.log_action("Scout", "Starting scheduled job scout for all users...", "Running")
         session = SessionLocal()
         try:
-            # Find jobs that are unscored or have fit_score = 0
-            jobs = session.query(Job).filter((Job.fit_score == 0) | (Job.fit_score == None)).all()
-            if not jobs:
-                self.log_action("Scout", "No unscored jobs found for evaluation.", "Success")
+            from core.db import User, UserProfile, ProfileFact
+            from scrapers.job_scout import fetch_and_save_jobs
+            import json
+            
+            users = session.query(User).all()
+            if not users:
+                self.log_action("Scout", "No users found in the database.", "Success")
+                return
+                
+            for user in users:
+                # Determine user search preferences
+                search_term = "AI Engineer"
+                location = "Bengaluru"
+                
+                # Check for preference facts
+                pref = session.query(ProfileFact).filter_by(user_id=user.id, category="Preference").first()
+                if pref:
+                    if len(pref.fact) < 50:
+                        search_term = pref.fact
+                else:
+                    # Check user profile skills
+                    profile = session.query(UserProfile).filter_by(user_id=user.id).first()
+                    if profile and profile.skills:
+                        try:
+                            skills = json.loads(profile.skills)
+                            if skills:
+                                search_term = skills[0]
+                        except:
+                            pass
+                
+                self.log_action("Scout", f"Starting scout for query '{search_term}' in '{location}'", "Running", user_id=user.id)
+                
+                try:
+                    jobs_df = fetch_and_save_jobs(search_term=search_term, location=location, results_wanted=20)
+                    if not jobs_df.empty:
+                        new_count = 0
+                        for _, row in jobs_df.iterrows():
+                            # Check if exists for this user specifically
+                            exists = session.query(Job).filter_by(url=row['job_url'], user_id=user.id).first()
+                            if not exists:
+                                new_job = Job(
+                                    user_id=user.id,
+                                    title=row['title'],
+                                    company=row['company'],
+                                    location=row['location'],
+                                    description=row['description'],
+                                    url=row['job_url'],
+                                    date_posted=str(row['date_posted']),
+                                    salary=str(row['salary_source']),
+                                    site=row['site'],
+                                    email=str(row['emails'])
+                                )
+                                session.add(new_job)
+                                new_count += 1
+                        session.commit()
+                        self.log_action("Scout", f"Scout complete. Found {new_count} new jobs.", "Success", user_id=user.id)
+                        
+                        # Automatically trigger evaluation for new jobs
+                        self.task_evaluate_jobs(user_id=user.id)
+                    else:
+                        self.log_action("Scout", "Scout complete. No new jobs found.", "Success", user_id=user.id)
+                except Exception as user_scout_err:
+                    self.log_action("Scout", f"Scout failed: {str(user_scout_err)}", "Failed", user_id=user.id)
+                    
+            self.log_action("Scout", "Global scheduled job scout completed.", "Success")
+        except Exception as e:
+            self.log_action("Scout", f"Scheduled scout failed: {str(e)}", "Failed")
+        finally:
+            session.close()
+
+    def task_evaluate_jobs(self, user_id=None, provider="gemini", model_name=None):
+        """
+        Autonomous Agentic AI Reasoning Loop to evaluate unscored jobs using ReAct pattern.
+        If user_id is None, runs for all users.
+        """
+        session = SessionLocal()
+        try:
+            if user_id is None:
+                from core.db import User
+                users = session.query(User).all()
+                self.log_action("Scout", f"Autonomous Job Evaluation Cycle Started for all {len(users)} users.", "Running")
+                for user in users:
+                    try:
+                        self.task_evaluate_jobs(user_id=user.id, provider=provider, model_name=model_name)
+                    except Exception as e:
+                        print(f"Error evaluating jobs for user {user.id}: {e}")
                 return
 
-            self.log_action("Scout", f"Found {len(jobs)} unscored jobs to evaluate.", "Running")
+            self.log_action("Scout", "Autonomous Job Evaluation Cycle Started", "Running", user_id=user_id)
             
-            from core.profile_memory_resume_phase2 import get_llm, get_chroma_client, get_rag_context, parse_json_output
-            chroma_client = get_chroma_client()
+            # Find jobs that are unscored or have fit_score = 0 for this user
+            jobs = session.query(Job).filter(
+                (Job.user_id == user_id) & 
+                ((Job.fit_score == 0) | (Job.fit_score == None))
+            ).all()
+            
+            if not jobs:
+                self.log_action("Scout", "No unscored jobs found for evaluation.", "Success", user_id=user_id)
+                return
+
+            self.log_action("Scout", f"Found {len(jobs)} unscored jobs to evaluate.", "Running", user_id=user_id)
+            
+            from core.profile_memory_resume_phase2 import get_llm, get_qdrant_client, get_rag_context, parse_json_output
+            qdrant_client = get_qdrant_client()
             
             for job in jobs:
-                self.log_action("Thought", f"Analyzing requirements for '{job.title}' at '{job.company}'...", "Running")
+                self.log_action("Thought", f"Analyzing requirements for '{job.title}' at '{job.company}'...", "Running", user_id=user_id)
                 time.sleep(0.5) # Slight pacing
                 
                 # Fetch RAG context
-                self.log_action("Action", f"Querying profile vector memory for '{job.title}' skills...", "Running")
-                context = get_rag_context(job.title, job.description or "", chroma_client)
+                self.log_action("Action", f"Querying profile vector memory for '{job.title}' skills...", "Running", user_id=user_id)
+                context = get_rag_context(job.title, job.description or "", qdrant_client, user_id)
                 
                 if not context.strip():
-                    self.log_action("Observation", "No relevant facts found in vector database. Checking SQL database facts...", "Running")
+                    self.log_action("Observation", "No relevant facts found in vector database. Checking SQL database facts...", "Running", user_id=user_id)
                     from core.db import ProfileFact
-                    db_facts = session.query(ProfileFact).all()
+                    db_facts = session.query(ProfileFact).filter_by(user_id=user_id).all()
                     if db_facts:
                         context = "## Candidate Profile Facts:\n" + "\n".join([f"- [{f.category}] {f.fact}" for f in db_facts])
                     else:
                         context = "No profile facts or resume data found. Please upload a profile or resume."
                 else:
-                    self.log_action("Observation", f"Retrieved matching profile context. Querying LLM for fit assessment...", "Running")
+                    self.log_action("Observation", f"Retrieved matching profile context. Querying LLM for fit assessment...", "Running", user_id=user_id)
                 
                 # Build agentic reasoning prompt
                 prompt = f"""
@@ -190,23 +239,29 @@ Do NOT output any markdown tags or text outside of the JSON object.
                         session.commit()
                         
                         # Log thought logs for terminal
-                        self.log_action("Thought", f"[{job.title}] {thought[:100]}...", "Success")
-                        self.log_action("Observation", f"Gaps: {gaps[:100]}", "Success")
-                        self.log_action("Decision", f"Job '{job.title}' rated {fit_score}%. Should auto-apply: {should_apply}", "Success")
+                        self.log_action("Thought", f"[{job.title}] {thought[:100]}...", "Success", user_id=user_id)
+                        self.log_action("Observation", f"Gaps: {gaps[:100]}", "Success", user_id=user_id)
+                        self.log_action("Decision", f"Job '{job.title}' rated {fit_score}%. Should auto-apply: {should_apply}", "Success", user_id=user_id)
                         
                         # Automatically trigger auto-apply if eligible
                         if should_apply:
-                            self.log_action("Apply", f"Automatic auto-apply triggered for {job.title} at {job.company}!", "Success")
-                            from backend.routers.jobs import run_apply_task
-                            run_apply_task(job.url)
+                            self.log_action("Apply", f"Automatic auto-apply triggered for {job.title} at {job.company}!", "Success", user_id=user_id)
+                            
+                            # Trigger auto apply via our tasks module (dynamic import to avoid circular dependency)
+                            from core.tasks import auto_apply_task, USE_QUEUE
+                            if USE_QUEUE:
+                                auto_apply_task.send(job.url, user_id, provider, model_name)
+                            else:
+                                from backend.routers.jobs import run_apply_task
+                                run_apply_task(job.url, provider=provider, model=model_name, user_id=user_id)
                     else:
-                        self.log_action("Scout", f"Failed to parse agent reasoning JSON for job {job.id}.", "Failed")
+                        self.log_action("Scout", f"Failed to parse agent reasoning JSON for job {job.id}.", "Failed", user_id=user_id)
                 except Exception as eval_err:
-                    self.log_action("Scout", f"Error during evaluation of job {job.id}: {str(eval_err)}", "Failed")
+                    self.log_action("Scout", f"Error during evaluation of job {job.id}: {str(eval_err)}", "Failed", user_id=user_id)
             
-            self.log_action("Scout", "Autonomous Evaluation Cycle Completed successfully.", "Success")
+            self.log_action("Scout", "Autonomous Evaluation Cycle Completed successfully.", "Success", user_id=user_id)
         except Exception as e:
-            self.log_action("Scout", f"Evaluation failed: {str(e)}", "Failed")
+            self.log_action("Scout", f"Evaluation failed: {str(e)}", "Failed", user_id=user_id)
         finally:
             session.close()
 

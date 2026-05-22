@@ -6,6 +6,11 @@ import glob
 import time
 from datetime import datetime
 
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass
+
 # --- Setup Paths ---
 _TEST_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_TEST_DIR)
@@ -109,12 +114,12 @@ def run_scraper_test():
 def run_rag_import_test():
     print_header("RAG Pipeline Import Test")
     try:
-        from core.profile_memory_resume_phase2 import get_chroma_client, get_llm
+        from core.profile_memory_resume_phase2 import get_qdrant_client, get_llm
         print("✅ Successfully imported RAG modules.")
         
-        # Check Chroma
-        client = get_chroma_client()
-        print("✅ ChromaDB client initialized.")
+        # Check Qdrant
+        client = get_qdrant_client()
+        print("✅ Qdrant client initialized.")
         
         # Check LLM Factory (don't invoke, just init)
         try:

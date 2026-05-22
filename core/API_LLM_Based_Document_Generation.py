@@ -1,6 +1,5 @@
 # core/API_LLM_Based_Document_Generation.py
 
-import streamlit as st
 import chromadb
 from langchain_google_genai import ChatGoogleGenerativeAI
 import os
@@ -14,7 +13,7 @@ CHROMA_PATH = os.path.join(_PROJECT_ROOT, 'data', 'chroma_data')
 load_dotenv()
 
 # --- Cached Resource Loading ---
-@st.cache_resource
+
 def get_llm():
     """Loads the LLM from the Google Gemini API."""
     print("Initializing Google Gemini LLM...")
@@ -27,7 +26,7 @@ def get_llm():
     )
 
 
-@st.cache_resource
+
 def get_chroma_client():
     print("Initializing ChromaDB client...")
     return chromadb.PersistentClient(path=CHROMA_PATH)
