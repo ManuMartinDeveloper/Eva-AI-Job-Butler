@@ -1,4 +1,3 @@
-import streamlit as st
 import chromadb
 import json
 import re
@@ -41,7 +40,7 @@ def get_llm(provider="gemini", model_name=None, temperature=0.7):
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
-@st.cache_resource
+
 def get_chroma_client():
     print("Initializing ChromaDB client...")
     return chromadb.PersistentClient(path=CHROMA_PATH)

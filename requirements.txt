@@ -17,8 +17,6 @@ playwright
 playwright-stealth
 
 # Frontend
-streamlit
-streamlit-aggrid
 
 # Scheduler
 apscheduler

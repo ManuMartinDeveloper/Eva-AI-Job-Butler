@@ -12,7 +12,7 @@ import chromadb
 from github import Github, GithubException
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
-import streamlit as st # Import Streamlit
+
 
 # Load environment variables
 load_dotenv() 
@@ -65,7 +65,7 @@ SOFT_SKILLS = [
 logging.basicConfig(filename="rag_pipeline.log", level=logging.ERROR, format="%(asctime)s - %(message)s")
 
 # --- Variable Initializations ---
-@st.cache_resource
+
 def get_embedder():
     print("Loading embedder model...")
     return SentenceTransformer('all-MiniLM-L6-v2', device="cpu")
