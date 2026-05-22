@@ -12,7 +12,8 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
 sys.path.append(_PROJECT_ROOT)
 
-from core.db import SessionLocal, ProfileFact
+from core.db import SessionLocal, ProfileFact, UserProfile
+from backend.auth import get_current_user, User
 from core.profile_memory_resume_phase2 import get_llm, parse_json_output
 
 router = APIRouter()
@@ -41,7 +42,7 @@ class ChatResponse(BaseModel):
     extracted_facts: List[str]
 
 @router.post("/message", response_model=ChatResponse)
-def handle_chat_message(req: ChatRequest, db: Session = Depends(get_db)):
+def handle_chat_message(req: ChatRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
         
@@ -50,18 +51,26 @@ def handle_chat_message(req: ChatRequest, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM initialization failed: {e}")
 
+    # Fetch profile to get user name dynamically
+    profile_info = db.query(UserProfile).filter(UserProfile.user_id == current_user.id).first()
+    user_name = "Candidate"
+    if profile_info and profile_info.name:
+        user_name = profile_info.name
+    elif current_user.email:
+        user_name = current_user.email.split("@")[0]
+
     # 1. Generate Eva's Chat Reply
     history_formatted = ""
     for msg in req.history:
-        role_label = "Manu" if msg.role == "user" else "Eva (Butler)"
+        role_label = user_name if msg.role == "user" else "Eva (Butler)"
         history_formatted += f"{role_label}: {msg.content}\n"
     
     chat_prompt = f"""
-    You are Eva, the personal AI Job Butler for Manu Martin. Your goal is to interview Manu to learn more about his background, skills, and projects so you can write stellar, tailored resumes for him.
+    You are Eva, the personal AI Job Butler for {user_name}. Your goal is to interview {user_name} to learn more about their background, skills, and projects so you can write stellar, tailored resumes for them.
     
     Conversation History:
     {history_formatted}
-    Manu: {req.message}
+    {user_name}: {req.message}
     
     Instructions:
     - Respond in an engaging, professional, and friendly butler-like tone.
@@ -80,7 +89,7 @@ def handle_chat_message(req: ChatRequest, db: Session = Depends(get_db)):
     # 2. Extract Facts in Parallel (Background or Synchronous fast prompt)
     # Ask the LLM to extract key skills or facts from the user's latest response in JSON format.
     extraction_prompt = f"""
-    Analyze the following user response from Manu Martin during a career interview.
+    Analyze the following user response from {user_name} during a career interview.
     Identify any new professional facts, skills, experiences, or project details that were explicitly stated.
     
     User Response: "{req.message}"
@@ -103,12 +112,13 @@ def handle_chat_message(req: ChatRequest, db: Session = Depends(get_db)):
         if parsed_ext and "facts" in parsed_ext:
             extracted_facts = parsed_ext["facts"]
             
-            # Save extracted facts to SQLite database
+            # Save extracted facts to database
             for fact_text in extracted_facts:
                 # Deduplicate or skip empty
                 if not fact_text.strip():
                     continue
                 new_fact = ProfileFact(
+                    user_id=current_user.id,
                     category="Interview",
                     fact=fact_text.strip(),
                     source="Interview Chat",
@@ -124,6 +134,7 @@ def handle_chat_message(req: ChatRequest, db: Session = Depends(get_db)):
     # just like the phase1 app did, to ensure no data is lost.
     if not extracted_facts:
         new_fact = ProfileFact(
+            user_id=current_user.id,
             category="Interview",
             fact=req.message.strip(),
             source="Interview Chat (Raw)",

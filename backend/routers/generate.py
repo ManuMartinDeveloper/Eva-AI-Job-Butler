@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict
+from backend.auth import get_current_user, User
 
 # --- Setup Paths ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -65,37 +66,39 @@ def replace_text_in_document(doc, placeholder, content):
                 para.add_run('\n')
 
 @router.post("/resume")
-def generate_resume(req: GenerateRequest):
+def generate_resume(req: GenerateRequest, current_user: User = Depends(get_current_user)):
     try:
         res = generate_resume_and_reasoning(
             job_title=req.job_title,
             job_desc=req.job_desc,
             provider=req.provider,
-            model_name=req.model_name
+            model_name=req.model_name,
+            user_id=current_user.id
         )
         return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @router.post("/coverletter")
-def generate_coverletter(req: GenerateRequest):
+def generate_coverletter(req: GenerateRequest, current_user: User = Depends(get_current_user)):
     try:
         res = generate_coverletter_and_reasoning(
             job_title=req.job_title,
             job_desc=req.job_desc,
             provider=req.provider,
-            model_name=req.model_name
+            model_name=req.model_name,
+            user_id=current_user.id
         )
         return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @router.post("/export")
-def export_docx(req: ExportRequest):
+def export_docx(req: ExportRequest, current_user: User = Depends(get_current_user)):
     safe_company = re.sub(r'[\\/*?:"<>|]', "", req.company_name)
     safe_job = re.sub(r'[\\/*?:"<>|]', "", req.job_title)
     
-    final_dir = os.path.join(OUTPUTS_DIR, safe_company, safe_job)
+    final_dir = os.path.join(OUTPUTS_DIR, str(current_user.id), safe_company, safe_job)
     os.makedirs(final_dir, exist_ok=True)
     
     if req.doc_type == "resume":
@@ -141,10 +144,11 @@ def export_docx(req: ExportRequest):
     return {"file_path": relative_path, "filename": os.path.basename(final_docx)}
 
 @router.get("/download")
-def download_file(file_path: str):
+def download_file(file_path: str, current_user: User = Depends(get_current_user)):
     # Sanitize path to prevent directory traversal
     clean_path = os.path.abspath(os.path.join(OUTPUTS_DIR, file_path))
-    if not clean_path.startswith(os.path.abspath(OUTPUTS_DIR)):
+    user_isolated_dir = os.path.abspath(os.path.join(OUTPUTS_DIR, str(current_user.id)))
+    if not clean_path.startswith(user_isolated_dir):
         raise HTTPException(status_code=403, detail="Access denied")
         
     if not os.path.exists(clean_path):

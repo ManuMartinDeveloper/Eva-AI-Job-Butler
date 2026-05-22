@@ -9,9 +9,12 @@ langchain-groq
 langchain-google-genai
 
 # Database and Memory
-chromadb
+qdrant-client
 sqlalchemy
-
+psycopg2-binary
+passlib[bcrypt]
+pyjwt
+python-multipart
 # Browser Automation
 playwright
 playwright-stealth

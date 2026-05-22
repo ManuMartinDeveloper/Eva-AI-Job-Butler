@@ -12,7 +12,8 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
 sys.path.append(_PROJECT_ROOT)
 
-from core.db import SessionLocal, Job, Application, AgentLog
+from core.db import SessionLocal, Job, Application, AgentLog, ProfileFact
+from backend.auth import get_current_user, User
 
 router = APIRouter()
 
@@ -57,103 +58,21 @@ class ApplyRequest(BaseModel):
     provider: Optional[str] = "gemini"
     model: Optional[str] = None
 
-def run_scout_task(search_term: str, location: str, limit: int):
-    """Run the job scout scraper script in a subprocess and log the action."""
-    db = SessionLocal()
-    log = AgentLog(action="Scout", details=f"Manual scout started for '{search_term}' in '{location}'", status="Running")
-    db.add(log)
-    db.commit()
-    db.refresh(log)
-    
-    try:
-        # Run scraper script as a subprocess
-        process = subprocess.run(
-            [sys.executable, "scrapers/job_scout.py", "--search", search_term, "--location", location, "--limit", str(limit)],
-            cwd=_PROJECT_ROOT,
-            capture_output=True,
-            text=True
-        )
-        
-        # Check for database synchronization from CSV
-        from scrapers.job_scout import fetch_and_save_jobs
-        # Re-import and run sync since we are already in-process or we just sync files
-        # The script scrapers/job_scout.py updates job_seeker.db.
-        # Now let's sync new jobs into agent_brain.db (Job model)
-        # We can implement a sync helper to copy from job_seeker.db to agent_brain.db
-        import sqlite3
-        seeker_db_path = os.path.join(_PROJECT_ROOT, 'data', 'job_seeker.db')
-        if os.path.exists(seeker_db_path):
-            conn = sqlite3.connect(seeker_db_path)
-            c = conn.cursor()
-            c.execute("SELECT title, company, location, description, url, date_posted, salary, site, email FROM jobs ORDER BY id DESC LIMIT ?", (limit * 2,))
-            scraped_jobs = c.fetchall()
-            conn.close()
-            
-            new_count = 0
-            for row in scraped_jobs:
-                title, company, loc, desc, url, date_posted, salary, site, email = row
-                exists = db.query(Job).filter_by(url=url).first()
-                if not exists:
-                    new_job = Job(
-                        title=title,
-                        company=company,
-                        location=loc,
-                        description=desc,
-                        url=url,
-                        date_posted=date_posted,
-                        salary=salary,
-                        site=site,
-                        email=email
-                    )
-                    db.add(new_job)
-                    new_count += 1
-            db.commit()
-            log.details = f"Scout complete. Found {new_count} new jobs."
-            log.status = "Success"
-        else:
-            log.details = "Scout completed but job_seeker.db was not found."
-            log.status = "Failed"
-            
-    except Exception as e:
-        log.details = f"Scout failed: {str(e)}"
-        log.status = "Failed"
-    finally:
-        db.commit()
-        db.close()
+def run_scout_task(search_term: str, location: str, limit: int, user_id: int):
+    # This function is now imported from core.tasks. Leaving a wrapper just in case.
+    from core.tasks import run_scout_task as task_impl
+    task_impl(search_term, location, limit, user_id)
 
-def run_apply_task(job_url: str, provider: str = "gemini", model: Optional[str] = None):
-    """Launches the headful Playwright form filler in the background."""
-    # Delete old session/screenshot files to prevent frontend displaying stale data
-    session_path = os.path.join(_PROJECT_ROOT, "outputs", "agent_session.json")
-    screenshot_path = os.path.join(_PROJECT_ROOT, "outputs", "agent_screenshot.png")
-    
-    if os.path.exists(session_path):
-        try:
-            os.remove(session_path)
-        except Exception as e:
-            print(f"Could not remove old session file: {e}")
-            
-    if os.path.exists(screenshot_path):
-        try:
-            os.remove(screenshot_path)
-        except Exception as e:
-            print(f"Could not remove old screenshot: {e}")
-            
-    try:
-        cmd = [sys.executable, "core/auto_apply.py", "--url", job_url, "--provider", provider]
-        if model:
-            cmd.extend(["--model", model])
-            
-        subprocess.Popen(
-            cmd,
-            cwd=_PROJECT_ROOT
-        )
-    except Exception as e:
-        print(f"Error launching auto apply: {e}")
+def run_apply_task(job_url: str, provider: str = "gemini", model: Optional[str] = None, user_id: Optional[int] = None):
+    # This function is now imported from core.tasks. Leaving a wrapper just in case.
+    from core.tasks import run_apply_task as task_impl
+    task_impl(job_url, provider, model, user_id, False)
+
+from core.tasks import trigger_scout_jobs, trigger_auto_apply
 
 @router.get("/", response_model=List[JobSchema])
-def list_jobs(db: Session = Depends(get_db)):
-    jobs = db.query(Job).order_by(Job.scouted_at.desc()).all()
+def list_jobs(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    jobs = db.query(Job).filter(Job.user_id == current_user.id).order_by(Job.scouted_at.desc()).all()
     # Serialize date
     result = []
     for j in jobs:
@@ -176,8 +95,8 @@ def list_jobs(db: Session = Depends(get_db)):
     return result
 
 @router.get("/{job_id}", response_model=JobSchema)
-def get_job(job_id: int, db: Session = Depends(get_db)):
-    j = db.query(Job).filter(Job.id == job_id).first()
+def get_job(job_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    j = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
     if not j:
         raise HTTPException(status_code=404, detail="Job not found")
     return {
@@ -198,24 +117,23 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
     }
 
 @router.post("/{job_id}/evaluate", response_model=JobSchema)
-def evaluate_single_job(job_id: int, db: Session = Depends(get_db)):
+def evaluate_single_job(job_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # 1. Fetch job
-    j = db.query(Job).filter(Job.id == job_id).first()
+    j = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
     if not j:
         raise HTTPException(status_code=404, detail="Job not found")
     
     # 2. Run evaluation
-    from core.profile_memory_resume_phase2 import get_llm, get_chroma_client, get_rag_context, parse_json_output
-    chroma_client = get_chroma_client()
+    from core.profile_memory_resume_phase2 import get_llm, get_qdrant_client, get_rag_context, parse_json_output
+    qdrant_client = get_qdrant_client()
     
     # We can log this to AgentLog
     from core.agent import agent
-    agent.log_action("Thought", f"Manual assessment started for '{j.title}' at '{j.company}'...", "Running")
+    agent.log_action("Thought", f"Manual assessment started for '{j.title}' at '{j.company}'...", "Running", user_id=current_user.id)
     
-    context = get_rag_context(j.title, j.description or "", chroma_client)
+    context = get_rag_context(j.title, j.description or "", qdrant_client, current_user.id)
     if not context.strip():
-        from core.db import ProfileFact
-        db_facts = db.query(ProfileFact).all()
+        db_facts = db.query(ProfileFact).filter(ProfileFact.user_id == current_user.id).all()
         if db_facts:
             context = "## Candidate Profile Facts:\n" + "\n".join([f"- [{f.category}] {f.fact}" for f in db_facts])
         else:
@@ -277,13 +195,13 @@ Do NOT output any markdown tags or text outside of the JSON object.
             db.commit()
             db.refresh(j)
             
-            agent.log_action("Thought", f"[Manual: {j.title}] {thought[:100]}...", "Success")
-            agent.log_action("Decision", f"Job '{j.title}' rated {fit_score}%", "Success")
+            agent.log_action("Thought", f"[Manual: {j.title}] {thought[:100]}...", "Success", user_id=current_user.id)
+            agent.log_action("Decision", f"Job '{j.title}' rated {fit_score}%", "Success", user_id=current_user.id)
         else:
-            agent.log_action("Scout", f"Failed to parse agent reasoning JSON for job {j.id}.", "Failed")
+            agent.log_action("Scout", f"Failed to parse agent reasoning JSON for job {j.id}.", "Failed", user_id=current_user.id)
             raise HTTPException(status_code=500, detail="Failed to parse agent reasoning.")
     except Exception as e:
-        agent.log_action("Scout", f"Error during manual evaluation of job {j.id}: {str(e)}", "Failed")
+        agent.log_action("Scout", f"Error during manual evaluation of job {j.id}: {str(e)}", "Failed", user_id=current_user.id)
         raise HTTPException(status_code=500, detail=str(e))
         
     return {
@@ -304,17 +222,17 @@ Do NOT output any markdown tags or text outside of the JSON object.
     }
 
 @router.post("/scout")
-def trigger_scout(req: ScoutRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_scout_task, req.search_term, req.location, req.limit)
+def trigger_scout(req: ScoutRequest, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
+    trigger_scout_jobs(req.search_term, req.location, req.limit, current_user.id, background_tasks)
     return {"message": "Job scout task started in the background."}
 
 @router.post("/{job_id}/apply", response_model=ApplyResponse)
-def trigger_apply(job_id: int, req: ApplyRequest = ApplyRequest(), background_tasks: BackgroundTasks = None, db: Session = Depends(get_db)):
-    j = db.query(Job).filter(Job.id == job_id).first()
+def trigger_apply(job_id: int, req: ApplyRequest = ApplyRequest(), background_tasks: BackgroundTasks = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    j = db.query(Job).filter(Job.id == job_id, Job.user_id == current_user.id).first()
     if not j:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    background_tasks.add_task(run_apply_task, j.url, req.provider, req.model)
+    trigger_auto_apply(j.url, current_user.id, req.provider, req.model, background_tasks)
     
     # Mark job as applied
     j.is_applied = True
@@ -327,5 +245,5 @@ def trigger_apply(job_id: int, req: ApplyRequest = ApplyRequest(), background_ta
         app_record.status = "Applied"
     db.commit()
     
-    return {"status": "success", "message": f"Assisted application launched in local browser for {j.title} at {j.company}."}
+    return {"status": "success", "message": f"Assisted application launched in browser for {j.title} at {j.company}."}
 

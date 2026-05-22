@@ -1,16 +1,16 @@
-import chromadb
-import json
+import os
 import re
+import json
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as rest_models
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama.llms import OllamaLLM
 from langchain_groq import ChatGroq
-import os
 from dotenv import load_dotenv
 
 # --- Setup Paths ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
-CHROMA_PATH = os.path.join(_PROJECT_ROOT, 'data', 'chroma_data')
 
 load_dotenv(os.path.join(_PROJECT_ROOT, '.env'))
 
@@ -41,9 +41,32 @@ def get_llm(provider="gemini", model_name=None, temperature=0.7):
         raise ValueError(f"Unknown provider: {provider}")
 
 
-def get_chroma_client():
-    print("Initializing ChromaDB client...")
-    return chromadb.PersistentClient(path=CHROMA_PATH)
+def get_qdrant_client():
+    print("Initializing Qdrant client...")
+    qdrant_url = os.environ.get("QDRANT_URL")
+    qdrant_api_key = os.environ.get("QDRANT_API_KEY")
+    if qdrant_url:
+        return QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+    else:
+        qdrant_path = os.path.join(_PROJECT_ROOT, 'data', 'qdrant_data')
+        os.makedirs(qdrant_path, exist_ok=True)
+        return QdrantClient(path=qdrant_path)
+
+def ensure_collection(client, collection_name="eva_profile_facts", vector_size=384):
+    try:
+        collections = client.get_collections().collections
+        exists = any(c.name == collection_name for c in collections)
+        if not exists:
+            client.create_collection(
+                collection_name=collection_name,
+                vectors_config=rest_models.VectorParams(
+                    size=vector_size,
+                    distance=rest_models.Distance.COSINE
+                )
+            )
+            print(f"Collection '{collection_name}' created in Qdrant.")
+    except Exception as e:
+        print(f"Error ensuring Qdrant collection: {e}")
 
 def parse_json_output(text):
     """
@@ -74,42 +97,78 @@ def parse_json_output(text):
     print(f"Failed to parse JSON. Raw output:\n{text}")
     return None
 
-def get_rag_context(job_title: str, job_desc: str, client) -> str:
+def get_rag_context(job_title: str, job_desc: str, client, user_id: int) -> str:
     """
-    Queries ChromaDB to retrieve relevant context.
+    Queries Qdrant to retrieve relevant context filtered by user_id and category.
     """
+    from core.ingest import embedder
+    
+    ensure_collection(client, "eva_profile_facts", 384)
+    
     query_map = {
         "skills": f"Relevant skills for a '{job_title}' role?",
         "experience": f"Past job experiences relevant to: {job_desc}?",
         "projects": f"Projects that showcase skills for this job: {job_desc}?"
     }
     context = ""
-    for coll_name, query in query_map.items():
+    for category_name, query_text in query_map.items():
         try:
-            collection = client.get_collection(coll_name)
-            results = collection.query(query_texts=[query], n_results=3)
-            if results and results.get('documents'):
-                context += f"## Relevant {coll_name}:\n" + "\n".join(results['documents'][0]) + "\n\n"
+            # Embed the query
+            query_vector = embedder.encode(query_text).tolist()
+            
+            # Query Qdrant with user_id and category filters
+            search_result = client.search(
+                collection_name="eva_profile_facts",
+                query_vector=query_vector,
+                query_filter=rest_models.Filter(
+                    must=[
+                        rest_models.FieldCondition(
+                            key="user_id",
+                            match=rest_models.MatchValue(value=user_id)
+                        ),
+                        rest_models.FieldCondition(
+                            key="category",
+                            match=rest_models.MatchValue(value=category_name)
+                        )
+                    ]
+                ),
+                limit=3
+            )
+            
+            if search_result:
+                documents = [hit.payload["content"] for hit in search_result if hit.payload and "content" in hit.payload]
+                if documents:
+                    context += f"## Relevant {category_name}:\n" + "\n".join(documents) + "\n\n"
         except Exception as e:
-            print(f"Error querying collection '{coll_name}': {e}")
+            print(f"Error querying Qdrant category '{category_name}': {e}")
     return context
 
 # --- Main Generation Functions ---
 
-def ingest_and_embed(clear_existing=False):
-    from .ingest import ingest_profile
-    ingest_profile()
+def ingest_and_embed(user_id: int, clear_existing=False):
+    from core.ingest import ingest_profile
+    ingest_profile(user_id=user_id)
 
-def generate_resume_and_reasoning(job_title: str, job_desc: str, provider="gemini", model_name=None) -> dict:
+def generate_resume_and_reasoning(job_title: str, job_desc: str, user_id: int, provider="gemini", model_name=None) -> dict:
     """
     Generates resume content in JSON format using RAG.
     """
     llm = get_llm(provider, model_name)
-    client = get_chroma_client()
-    context = get_rag_context(job_title, job_desc, client)
+    client = get_qdrant_client()
+    context = get_rag_context(job_title, job_desc, client, user_id)
     
-    if not context:
-        return {"document": {}, "reasoning": "Failed to retrieve context from ChromaDB."}
+    if not context.strip():
+        # Fallback to DB ProfileFact
+        from core.db import SessionLocal, ProfileFact
+        session = SessionLocal()
+        try:
+            db_facts = session.query(ProfileFact).filter(ProfileFact.user_id == user_id).all()
+            if db_facts:
+                context = "## Candidate Profile Facts:\n" + "\n".join([f"- [{f.category}] {f.fact}" for f in db_facts])
+            else:
+                context = "No profile facts or resume data found."
+        finally:
+            session.close()
 
     prompt = f"""
     Act as an expert career coach. Based on the USER PROFILE and JOB DESCRIPTION below, generate a JSON object for a resume.
@@ -162,16 +221,26 @@ def generate_resume_and_reasoning(job_title: str, job_desc: str, provider="gemin
             "reasoning": "The AI did not return valid JSON."
         }
 
-def generate_coverletter_and_reasoning(job_title: str, job_desc: str, provider="gemini", model_name=None) -> dict:
+def generate_coverletter_and_reasoning(job_title: str, job_desc: str, user_id: int, provider="gemini", model_name=None) -> dict:
     """
     Generates a cover letter in JSON format using RAG.
     """
     llm = get_llm(provider, model_name)
-    client = get_chroma_client()
-    context = get_rag_context(job_title, job_desc, client)
+    client = get_qdrant_client()
+    context = get_rag_context(job_title, job_desc, client, user_id)
     
-    if not context:
-        return {"document": "Failed to retrieve context from ChromaDB.", "reasoning": "Failed to retrieve context."}
+    if not context.strip():
+        # Fallback to DB ProfileFact
+        from core.db import SessionLocal, ProfileFact
+        session = SessionLocal()
+        try:
+            db_facts = session.query(ProfileFact).filter(ProfileFact.user_id == user_id).all()
+            if db_facts:
+                context = "## Candidate Profile Facts:\n" + "\n".join([f"- [{f.category}] {f.fact}" for f in db_facts])
+            else:
+                context = "No profile facts or resume data found."
+        finally:
+            session.close()
 
     prompt = f"""
     Act as an expert career coach. Write a compelling cover letter for the role of '{job_title}'.
